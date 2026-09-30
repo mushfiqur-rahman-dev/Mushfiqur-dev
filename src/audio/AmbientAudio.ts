@@ -64,10 +64,10 @@ class AmbientAudioEngine {
       this.masterGain.connect(this.compressor);
       this.compressor.connect(this.ctx.destination);
 
-      // Listen for browser audio state changes (e.g. unlocked by gesture)
+      // Listen for browser audio state changes (e.g. unlocked by user gesture)
       this.ctx.onstatechange = () => {
         if (this.ctx?.state === 'running' && this.isPlaying) {
-          this.ensureLoopsRunning();
+          this.startAmbientPlayback();
         }
       };
     }
@@ -81,24 +81,38 @@ class AmbientAudioEngine {
     if (this.unlockListenersAttached || typeof window === 'undefined') return;
     this.unlockListenersAttached = true;
 
-    const unlock = () => {
-      if (this.ctx && this.ctx.state === 'suspended') {
+    const unlockHandler = () => {
+      this.initContext();
+      if (!this.ctx) return;
+
+      // Play 1-sample silent buffer for iOS Safari & Android Chrome hardware unlock
+      try {
+        const buffer = this.ctx.createBuffer(1, 1, 22050);
+        const source = this.ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(this.ctx.destination);
+        source.start(0);
+      } catch {
+        // Fallback
+      }
+
+      if (this.ctx.state === 'suspended') {
         this.ctx
           .resume()
           .then(() => {
             if (this.isPlaying) {
-              this.ensureLoopsRunning();
+              this.startAmbientPlayback();
             }
           })
           .catch(() => {});
-      } else if (!this.ctx && this.isPlaying) {
-        this.start();
+      } else if (this.ctx.state === 'running' && this.isPlaying && !this.padTimer) {
+        this.startAmbientPlayback();
       }
     };
 
-    const events = ['pointerdown', 'touchstart', 'touchend', 'click', 'scroll', 'keydown'];
+    const events = ['pointerdown', 'touchstart', 'touchend', 'click', 'scroll', 'keydown', 'wheel'];
     events.forEach((evt) => {
-      window.addEventListener(evt, unlock, { passive: true });
+      window.addEventListener(evt, unlockHandler, { capture: true, passive: true });
     });
   }
 
@@ -113,19 +127,18 @@ class AmbientAudioEngine {
     }
   }
 
-  private ensureLoopsRunning() {
-    if (!this.ctx || this.ctx.state !== 'running' || !this.isPlaying || !this.masterGain) return;
+  private startAmbientPlayback() {
+    if (!this.isPlaying || !this.ctx || this.ctx.state !== 'running' || !this.masterGain) return;
 
+    this.clearTimers();
+
+    // Smooth master fade-in
     this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
-    this.masterGain.gain.setValueAtTime(Math.max(0.001, this.masterGain.gain.value), this.ctx.currentTime);
+    this.masterGain.gain.setValueAtTime(0.01, this.ctx.currentTime);
     this.masterGain.gain.exponentialRampToValueAtTime(0.75, this.ctx.currentTime + 1.5);
 
-    if (!this.padTimer) {
-      this.playAmbientChordLoop();
-    }
-    if (!this.chimeTimer) {
-      this.scheduleWindChimes();
-    }
+    this.playAmbientChordLoop();
+    this.scheduleWindChimes();
   }
 
   public start() {
@@ -133,7 +146,7 @@ class AmbientAudioEngine {
     this.initContext();
 
     if (this.ctx && this.ctx.state === 'running') {
-      this.ensureLoopsRunning();
+      this.startAmbientPlayback();
     }
   }
 
@@ -157,11 +170,15 @@ class AmbientAudioEngine {
   }
 
   private playAmbientChordLoop() {
-    if (!this.isPlaying || !this.ctx || this.ctx.state !== 'running' || !this.masterGain) return;
+    if (!this.isPlaying || !this.ctx || this.ctx.state !== 'running' || !this.masterGain) {
+      this.clearTimers();
+      return;
+    }
 
     const chord = this.chordProgressions[this.currentChordIndex];
     this.currentChordIndex = (this.currentChordIndex + 1) % this.chordProgressions.length;
     const duration = 7.5; // seconds per chord swell
+    const t = this.ctx.currentTime;
 
     chord.forEach((freq, idx) => {
       if (!this.ctx || !this.masterGain || this.ctx.state !== 'running') return;
@@ -172,17 +189,16 @@ class AmbientAudioEngine {
 
       // Warm analog tone
       osc.type = idx % 2 === 0 ? 'sine' : 'triangle';
-      osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+      osc.frequency.setValueAtTime(freq, t);
 
       // Subtle stereo detuning for rich chorus vibe
-      osc.detune.setValueAtTime((idx - 1.5) * 6, this.ctx.currentTime);
+      osc.detune.setValueAtTime((idx - 1.5) * 6, t);
 
       // Lowpass filter tuned for phone speakers & headphone richness
       filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(1200 + idx * 180, this.ctx.currentTime);
+      filter.frequency.setValueAtTime(1200 + idx * 180, t);
 
       // Smooth volume envelope: slow swell, sustain, soft fade
-      const t = this.ctx.currentTime;
       gain.gain.setValueAtTime(0.0001, t);
       gain.gain.linearRampToValueAtTime(0.14 / (idx + 1), t + 2.5);
       gain.gain.linearRampToValueAtTime(0.12 / (idx + 1), t + 5.0);
@@ -198,20 +214,26 @@ class AmbientAudioEngine {
 
     this.padTimer = window.setTimeout(() => {
       this.padTimer = null;
-      if (this.isPlaying) {
+      if (this.isPlaying && this.ctx?.state === 'running') {
         this.playAmbientChordLoop();
       }
     }, (duration - 1.5) * 1000);
   }
 
   private scheduleWindChimes() {
-    if (!this.isPlaying || !this.ctx || this.ctx.state !== 'running') return;
+    if (!this.isPlaying || !this.ctx || this.ctx.state !== 'running') {
+      if (this.chimeTimer) {
+        window.clearTimeout(this.chimeTimer);
+        this.chimeTimer = null;
+      }
+      return;
+    }
 
     // Trigger random pentatonic bell tone every 2.5 - 5 seconds
     const delay = 2500 + Math.random() * 3000;
     this.chimeTimer = window.setTimeout(() => {
       this.chimeTimer = null;
-      if (this.isPlaying) {
+      if (this.isPlaying && this.ctx?.state === 'running') {
         this.playSingleChime();
         this.scheduleWindChimes();
       }
