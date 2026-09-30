@@ -92,12 +92,12 @@ export const LiquidHeader: React.FC = () => {
         </Magnetic>
 
         {/* Center: Navigation Links with Animated Layout Pill Slider */}
-        <div className="flex items-center gap-0.5 sm:gap-1.5 relative shrink">
+        <div className="flex items-center gap-1 sm:gap-1.5 relative shrink">
           {[
             { id: 'about', label: 'About' },
             { id: 'skills', label: 'Skills' },
-            { id: 'experience', label: 'Exp.' },
-            { id: 'projects', label: 'Works' },
+            { id: 'experience', label: 'Experience' },
+            { id: 'projects', label: 'Projects' },
             { id: 'contact', label: 'Contact' },
           ].map((item) => {
             const isActive = activeSection === item.id;
@@ -105,7 +105,7 @@ export const LiquidHeader: React.FC = () => {
               <button
                 key={item.id}
                 onClick={() => scrollTo(item.id)}
-                className={`relative px-2 sm:px-3 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs font-medium transition-colors duration-200 cursor-pointer ${
+                className={`relative px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full text-xs font-medium transition-colors duration-200 cursor-pointer whitespace-nowrap ${
                   isActive ? 'text-white' : 'text-slate-600 hover:text-black hover:bg-black/5'
                 }`}
               >

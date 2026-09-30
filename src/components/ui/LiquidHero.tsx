@@ -80,10 +80,10 @@ export const LiquidHero: React.FC = () => {
         >
           {/* Big High-Contrast Liquid Chrome Heading */}
           <motion.div variants={itemVariants} className="space-y-1 sm:space-y-2">
-            <h1 className="text-5xl sm:text-8xl md:text-9xl font-extrabold tracking-tighter text-[#09090b] leading-[0.9] select-none uppercase">
+            <h1 className="text-6xl sm:text-8xl md:text-9xl font-extrabold tracking-tighter text-black leading-[0.9] select-none uppercase">
               Mushfiq
             </h1>
-            <h2 className="text-5xl sm:text-8xl md:text-9xl font-extrabold tracking-tighter liquid-text leading-[0.9] select-none uppercase">
+            <h2 className="text-6xl sm:text-8xl md:text-9xl font-extrabold tracking-tighter liquid-text leading-[0.9] select-none uppercase">
               Visions
             </h2>
           </motion.div>
