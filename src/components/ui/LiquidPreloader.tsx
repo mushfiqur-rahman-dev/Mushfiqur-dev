@@ -49,6 +49,7 @@ export const LiquidPreloader: React.FC<LiquidPreloaderProps> = ({ onComplete }) 
         setTimeout(() => {
           setIsFinished(true);
           try {
+            ambientAudio.unlock();
             ambientAudio.playModalOpen();
           } catch {
             // Audio policy fallback
@@ -70,6 +71,9 @@ export const LiquidPreloader: React.FC<LiquidPreloaderProps> = ({ onComplete }) 
       {!isFinished && (
         <motion.div
           key="liquid-preloader"
+          onClick={() => ambientAudio.unlock()}
+          onTouchStart={() => ambientAudio.unlock()}
+          onPointerDown={() => ambientAudio.unlock()}
           initial={{ opacity: 1, y: 0 }}
           exit={{
             y: '-100%',

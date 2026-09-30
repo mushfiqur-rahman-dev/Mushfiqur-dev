@@ -41,25 +41,25 @@ class AmbientAudioEngine {
     this.attachAutoUnlockListeners();
   }
 
-  private initContext() {
-    if (!this.ctx) {
+  private ensureContext(): AudioContext | null {
+    if (!this.ctx && typeof window !== 'undefined') {
       const AudioCtxClass =
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (!AudioCtxClass) return;
+      if (!AudioCtxClass) return null;
 
       this.ctx = new AudioCtxClass();
 
       // Dynamics compressor prevents clipping and boosts perceived loudness on mobile speakers
       this.compressor = this.ctx.createDynamicsCompressor();
-      this.compressor.threshold.setValueAtTime(-18, this.ctx.currentTime);
-      this.compressor.knee.setValueAtTime(12, this.ctx.currentTime);
+      this.compressor.threshold.setValueAtTime(-16, this.ctx.currentTime);
+      this.compressor.knee.setValueAtTime(10, this.ctx.currentTime);
       this.compressor.ratio.setValueAtTime(4, this.ctx.currentTime);
       this.compressor.attack.setValueAtTime(0.003, this.ctx.currentTime);
       this.compressor.release.setValueAtTime(0.25, this.ctx.currentTime);
 
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.setValueAtTime(0.75, this.ctx.currentTime);
+      this.masterGain.gain.setValueAtTime(0.8, this.ctx.currentTime);
 
       this.masterGain.connect(this.compressor);
       this.compressor.connect(this.ctx.destination);
@@ -75,6 +75,8 @@ class AmbientAudioEngine {
     if (this.ctx && this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
     }
+
+    return this.ctx;
   }
 
   private attachAutoUnlockListeners() {
@@ -82,38 +84,45 @@ class AmbientAudioEngine {
     this.unlockListenersAttached = true;
 
     const unlockHandler = () => {
-      this.initContext();
-      if (!this.ctx) return;
-
-      // Play 1-sample silent buffer for iOS Safari & Android Chrome hardware unlock
-      try {
-        const buffer = this.ctx.createBuffer(1, 1, 22050);
-        const source = this.ctx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(this.ctx.destination);
-        source.start(0);
-      } catch {
-        // Fallback
-      }
-
-      if (this.ctx.state === 'suspended') {
-        this.ctx
-          .resume()
-          .then(() => {
-            if (this.isPlaying) {
-              this.startAmbientPlayback();
-            }
-          })
-          .catch(() => {});
-      } else if (this.ctx.state === 'running' && this.isPlaying && !this.padTimer) {
-        this.startAmbientPlayback();
-      }
+      this.unlock();
     };
 
     const events = ['pointerdown', 'touchstart', 'touchend', 'click', 'scroll', 'keydown', 'wheel'];
     events.forEach((evt) => {
       window.addEventListener(evt, unlockHandler, { capture: true, passive: true });
+      document.addEventListener(evt, unlockHandler, { capture: true, passive: true });
     });
+  }
+
+  public unlock() {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    // Hardware sound pipeline activation (plays 1-sample silent oscillator)
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      gain.gain.value = 0.0001;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(0);
+      osc.stop(ctx.currentTime + 0.01);
+    } catch {
+      // Fallback
+    }
+
+    if (ctx.state === 'suspended') {
+      ctx
+        .resume()
+        .then(() => {
+          if (this.isPlaying) {
+            this.startAmbientPlayback();
+          }
+        })
+        .catch(() => {});
+    } else if (ctx.state === 'running' && this.isPlaying && !this.padTimer) {
+      this.startAmbientPlayback();
+    }
   }
 
   private clearTimers() {
@@ -128,14 +137,15 @@ class AmbientAudioEngine {
   }
 
   private startAmbientPlayback() {
-    if (!this.isPlaying || !this.ctx || this.ctx.state !== 'running' || !this.masterGain) return;
+    const ctx = this.ensureContext();
+    if (!this.isPlaying || !ctx || ctx.state !== 'running' || !this.masterGain) return;
 
     this.clearTimers();
 
-    // Smooth master fade-in
-    this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
-    this.masterGain.gain.setValueAtTime(0.01, this.ctx.currentTime);
-    this.masterGain.gain.exponentialRampToValueAtTime(0.75, this.ctx.currentTime + 1.5);
+    // Smooth master fade-in using rock-solid setTargetAtTime
+    this.masterGain.gain.cancelScheduledValues(ctx.currentTime);
+    this.masterGain.gain.setValueAtTime(0.01, ctx.currentTime);
+    this.masterGain.gain.setTargetAtTime(0.8, ctx.currentTime, 0.4);
 
     this.playAmbientChordLoop();
     this.scheduleWindChimes();
@@ -143,10 +153,12 @@ class AmbientAudioEngine {
 
   public start() {
     this.isPlaying = true;
-    this.initContext();
+    const ctx = this.ensureContext();
 
-    if (this.ctx && this.ctx.state === 'running') {
+    if (ctx && ctx.state === 'running') {
       this.startAmbientPlayback();
+    } else {
+      this.unlock();
     }
   }
 
@@ -158,30 +170,29 @@ class AmbientAudioEngine {
 
     // Smooth master fade-out
     this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
-    this.masterGain.gain.setValueAtTime(Math.max(0.001, this.masterGain.gain.value), this.ctx.currentTime);
-    this.masterGain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 0.8);
+    this.masterGain.gain.setTargetAtTime(0.0001, this.ctx.currentTime, 0.2);
   }
 
   public setVolume(volume: number) {
     if (!this.ctx || !this.masterGain) return;
     const clamped = Math.max(0, Math.min(1, volume));
     this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
-    this.masterGain.gain.setValueAtTime(Math.max(0.0001, clamped * 0.8), this.ctx.currentTime);
+    this.masterGain.gain.setTargetAtTime(Math.max(0.0001, clamped * 0.8), this.ctx.currentTime, 0.1);
   }
 
   private playAmbientChordLoop() {
-    if (!this.isPlaying || !this.ctx || this.ctx.state !== 'running' || !this.masterGain) {
-      this.clearTimers();
+    const ctx = this.ctx;
+    if (!this.isPlaying || !ctx || ctx.state !== 'running' || !this.masterGain) {
       return;
     }
 
     const chord = this.chordProgressions[this.currentChordIndex];
     this.currentChordIndex = (this.currentChordIndex + 1) % this.chordProgressions.length;
     const duration = 7.5; // seconds per chord swell
-    const t = this.ctx.currentTime;
+    const t = ctx.currentTime;
 
     chord.forEach((freq, idx) => {
-      if (!this.ctx || !this.masterGain || this.ctx.state !== 'running') return;
+      if (!this.isPlaying || !this.ctx || this.ctx.state !== 'running' || !this.masterGain) return;
 
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
@@ -196,13 +207,12 @@ class AmbientAudioEngine {
 
       // Lowpass filter tuned for phone speakers & headphone richness
       filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(1200 + idx * 180, t);
+      filter.frequency.setValueAtTime(1400 + idx * 200, t);
 
-      // Smooth volume envelope: slow swell, sustain, soft fade
+      // Smooth volume envelope: slow swell, sustain, soft fade using setTargetAtTime
       gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.linearRampToValueAtTime(0.14 / (idx + 1), t + 2.5);
-      gain.gain.linearRampToValueAtTime(0.12 / (idx + 1), t + 5.0);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+      gain.gain.setTargetAtTime(0.18 / (idx + 1), t, 0.6);
+      gain.gain.setTargetAtTime(0.0001, t + 4.8, 0.7);
 
       osc.connect(filter);
       filter.connect(gain);
@@ -222,10 +232,6 @@ class AmbientAudioEngine {
 
   private scheduleWindChimes() {
     if (!this.isPlaying || !this.ctx || this.ctx.state !== 'running') {
-      if (this.chimeTimer) {
-        window.clearTimeout(this.chimeTimer);
-        this.chimeTimer = null;
-      }
       return;
     }
 
@@ -241,42 +247,41 @@ class AmbientAudioEngine {
   }
 
   private playSingleChime() {
-    if (!this.ctx || this.ctx.state !== 'running' || !this.masterGain) return;
+    const ctx = this.ctx;
+    if (!this.isPlaying || !ctx || ctx.state !== 'running' || !this.masterGain) return;
 
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
     const randomNote = this.notes[Math.floor(Math.random() * this.notes.length)];
 
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(randomNote, this.ctx.currentTime);
+    osc.frequency.setValueAtTime(randomNote, ctx.currentTime);
 
-    const t = this.ctx.currentTime;
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.linearRampToValueAtTime(0.12, t + 0.05);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 3.0);
+    const t = ctx.currentTime;
+    gain.gain.setValueAtTime(0.16, t);
+    gain.gain.setTargetAtTime(0.0001, t + 0.05, 0.8);
 
     osc.connect(gain);
     gain.connect(this.masterGain);
 
     osc.start(t);
-    osc.stop(t + 3.2);
+    osc.stop(t + 3.0);
   }
 
   public playInteractiveHover() {
-    this.initContext();
-    if (!this.ctx || this.ctx.state !== 'running' || !this.masterGain) return;
+    const ctx = this.ensureContext();
+    if (!ctx || ctx.state !== 'running' || !this.masterGain) return;
 
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
 
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(880, this.ctx.currentTime); // A5
-    osc.frequency.exponentialRampToValueAtTime(1320, this.ctx.currentTime + 0.08);
+    osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
+    osc.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.08);
 
-    const t = this.ctx.currentTime;
-    gain.gain.setValueAtTime(0.001, t);
-    gain.gain.linearRampToValueAtTime(0.07, t + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    const t = ctx.currentTime;
+    gain.gain.setValueAtTime(0.08, t);
+    gain.gain.setTargetAtTime(0.0001, t + 0.02, 0.04);
 
     osc.connect(gain);
     gain.connect(this.masterGain);
@@ -286,13 +291,13 @@ class AmbientAudioEngine {
   }
 
   public playModalOpen() {
-    this.initContext();
-    if (!this.ctx || this.ctx.state !== 'running' || !this.masterGain) return;
+    const ctx = this.ensureContext();
+    if (!ctx || ctx.state !== 'running' || !this.masterGain) return;
 
     // Two-note crystal arpeggio for modal slide-in
     const chords = [587.33, 880.00]; // D5, A5
     chords.forEach((freq, i) => {
-      if (!this.ctx || this.ctx.state !== 'running' || !this.masterGain) return;
+      if (!this.ctx || !this.masterGain || this.ctx.state !== 'running') return;
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
 
@@ -300,9 +305,8 @@ class AmbientAudioEngine {
       osc.frequency.setValueAtTime(freq, this.ctx.currentTime + i * 0.06);
 
       const t = this.ctx.currentTime + i * 0.06;
-      gain.gain.setValueAtTime(0.001, t);
-      gain.gain.linearRampToValueAtTime(0.09, t + 0.04);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.8);
+      gain.gain.setValueAtTime(0.1, t);
+      gain.gain.setTargetAtTime(0.0001, t + 0.04, 0.3);
 
       osc.connect(gain);
       gain.connect(this.masterGain);

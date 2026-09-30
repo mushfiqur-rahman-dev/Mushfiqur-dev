@@ -25,22 +25,23 @@ export const App: React.FC = () => {
   }, [isAudioPlaying]);
 
   useEffect(() => {
-    const handleFirstGesture = () => {
+    const handleGesture = () => {
       if (usePortfolioStore.getState().isAudioPlaying) {
-        ambientAudio.start();
+        ambientAudio.unlock();
       }
     };
 
-    window.addEventListener('pointerdown', handleFirstGesture, { once: true, passive: true });
-    window.addEventListener('touchstart', handleFirstGesture, { once: true, passive: true });
-    window.addEventListener('scroll', handleFirstGesture, { once: true, passive: true });
-    window.addEventListener('click', handleFirstGesture, { once: true, passive: true });
+    const eventList = ['pointerdown', 'touchstart', 'touchend', 'click', 'keydown', 'scroll'];
+    eventList.forEach((evt) => {
+      window.addEventListener(evt, handleGesture, { capture: true, passive: true });
+      document.addEventListener(evt, handleGesture, { capture: true, passive: true });
+    });
 
     return () => {
-      window.removeEventListener('pointerdown', handleFirstGesture);
-      window.removeEventListener('touchstart', handleFirstGesture);
-      window.removeEventListener('scroll', handleFirstGesture);
-      window.removeEventListener('click', handleFirstGesture);
+      eventList.forEach((evt) => {
+        window.removeEventListener(evt, handleGesture);
+        document.removeEventListener(evt, handleGesture);
+      });
     };
   }, []);
 
