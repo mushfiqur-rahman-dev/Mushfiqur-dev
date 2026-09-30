@@ -15,7 +15,7 @@ export const App: React.FC = () => {
   const isAudioPlaying = usePortfolioStore((s) => s.isAudioPlaying);
   const [isPreloaderVisible, setIsPreloaderVisible] = useState(true);
 
-  // Sync ambient audio with global store
+  // Sync ambient audio with global store & autoplay on first interaction
   useEffect(() => {
     if (isAudioPlaying) {
       ambientAudio.start();
@@ -23,6 +23,26 @@ export const App: React.FC = () => {
       ambientAudio.stop();
     }
   }, [isAudioPlaying]);
+
+  useEffect(() => {
+    const handleFirstGesture = () => {
+      if (usePortfolioStore.getState().isAudioPlaying) {
+        ambientAudio.start();
+      }
+    };
+
+    window.addEventListener('pointerdown', handleFirstGesture, { once: true, passive: true });
+    window.addEventListener('touchstart', handleFirstGesture, { once: true, passive: true });
+    window.addEventListener('scroll', handleFirstGesture, { once: true, passive: true });
+    window.addEventListener('click', handleFirstGesture, { once: true, passive: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', handleFirstGesture);
+      window.removeEventListener('touchstart', handleFirstGesture);
+      window.removeEventListener('scroll', handleFirstGesture);
+      window.removeEventListener('click', handleFirstGesture);
+    };
+  }, []);
 
   return (
     <main className="relative min-h-screen w-full bg-white text-slate-900 font-sans selection:bg-slate-900 selection:text-white">

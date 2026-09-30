@@ -1,13 +1,14 @@
 /**
  * Procedural Web Audio API Soundscape & Interactive SFX Generator
  * High-fidelity, zero-latency ambient audio loop with pentatonic chimes,
- * warm analog chord pads, and tactile UI click feedback.
+ * warm analog chord pads, dynamics compressor, and tactile UI click feedback.
  */
 
 class AmbientAudioEngine {
   private ctx: AudioContext | null = null;
   private isPlaying = false;
   private masterGain: GainNode | null = null;
+  private compressor: DynamicsCompressorNode | null = null;
   private chimeTimer: number | null = null;
   private padTimer: number | null = null;
 
@@ -37,12 +38,24 @@ class AmbientAudioEngine {
 
   private initContext() {
     if (!this.ctx) {
-      const AudioCtxClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtxClass =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new AudioCtxClass();
 
+      // Dynamics compressor prevents clipping and boosts perceived loudness on mobile speakers
+      this.compressor = this.ctx.createDynamicsCompressor();
+      this.compressor.threshold.setValueAtTime(-18, this.ctx.currentTime);
+      this.compressor.knee.setValueAtTime(12, this.ctx.currentTime);
+      this.compressor.ratio.setValueAtTime(4, this.ctx.currentTime);
+      this.compressor.attack.setValueAtTime(0.003, this.ctx.currentTime);
+      this.compressor.release.setValueAtTime(0.25, this.ctx.currentTime);
+
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.setValueAtTime(0.3, this.ctx.currentTime);
-      this.masterGain.connect(this.ctx.destination);
+      this.masterGain.gain.setValueAtTime(0.75, this.ctx.currentTime);
+
+      this.masterGain.connect(this.compressor);
+      this.compressor.connect(this.ctx.destination);
     }
 
     if (this.ctx.state === 'suspended') {
@@ -60,7 +73,7 @@ class AmbientAudioEngine {
     // Smooth master fade-in
     this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
     this.masterGain.gain.setValueAtTime(0.001, this.ctx.currentTime);
-    this.masterGain.gain.exponentialRampToValueAtTime(0.35, this.ctx.currentTime + 3);
+    this.masterGain.gain.exponentialRampToValueAtTime(0.75, this.ctx.currentTime + 2.5);
 
     this.playAmbientChordLoop();
     this.scheduleWindChimes();
@@ -83,7 +96,7 @@ class AmbientAudioEngine {
     if (!this.ctx || !this.masterGain) return;
     const clamped = Math.max(0, Math.min(1, volume));
     this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
-    this.masterGain.gain.setValueAtTime(Math.max(0.0001, clamped * 0.4), this.ctx.currentTime);
+    this.masterGain.gain.setValueAtTime(Math.max(0.0001, clamped * 0.8), this.ctx.currentTime);
   }
 
   private playAmbientChordLoop() {
@@ -107,15 +120,15 @@ class AmbientAudioEngine {
       // Subtle stereo detuning for rich chorus vibe
       osc.detune.setValueAtTime((idx - 1.5) * 6, this.ctx.currentTime);
 
-      // Low pass filter for warm lo-fi feel
+      // Lowpass filter tuned for phone speakers & headphone richness
       filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(500 + idx * 80, this.ctx.currentTime);
+      filter.frequency.setValueAtTime(1200 + idx * 180, this.ctx.currentTime);
 
       // Smooth volume envelope: slow swell, sustain, soft fade
       const t = this.ctx.currentTime;
       gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.linearRampToValueAtTime(0.045 / (idx + 1), t + 2.5);
-      gain.gain.linearRampToValueAtTime(0.04 / (idx + 1), t + 5.0);
+      gain.gain.linearRampToValueAtTime(0.14 / (idx + 1), t + 2.5);
+      gain.gain.linearRampToValueAtTime(0.12 / (idx + 1), t + 5.0);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
 
       osc.connect(filter);
@@ -156,7 +169,7 @@ class AmbientAudioEngine {
 
     const t = this.ctx.currentTime;
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.linearRampToValueAtTime(0.035, t + 0.05);
+    gain.gain.linearRampToValueAtTime(0.12, t + 0.05);
     gain.gain.exponentialRampToValueAtTime(0.0001, t + 3.0);
 
     osc.connect(gain);
@@ -179,7 +192,7 @@ class AmbientAudioEngine {
 
     const t = this.ctx.currentTime;
     gain.gain.setValueAtTime(0.001, t);
-    gain.gain.linearRampToValueAtTime(0.025, t + 0.02);
+    gain.gain.linearRampToValueAtTime(0.07, t + 0.02);
     gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
 
     osc.connect(gain);
@@ -205,7 +218,7 @@ class AmbientAudioEngine {
 
       const t = this.ctx.currentTime + i * 0.06;
       gain.gain.setValueAtTime(0.001, t);
-      gain.gain.linearRampToValueAtTime(0.04, t + 0.04);
+      gain.gain.linearRampToValueAtTime(0.09, t + 0.04);
       gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.8);
 
       osc.connect(gain);
