@@ -11,6 +11,7 @@ class AmbientAudioEngine {
   private compressor: DynamicsCompressorNode | null = null;
   private chimeTimer: number | null = null;
   private padTimer: number | null = null;
+  private unlockListenersAttached = false;
 
   // Peaceful pentatonic scale frequencies (Hz) for serene atmosphere
   private readonly notes = [
@@ -36,11 +37,17 @@ class AmbientAudioEngine {
 
   private currentChordIndex = 0;
 
+  constructor() {
+    this.attachAutoUnlockListeners();
+  }
+
   private initContext() {
     if (!this.ctx) {
       const AudioCtxClass =
         window.AudioContext ||
         (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtxClass) return;
+
       this.ctx = new AudioCtxClass();
 
       // Dynamics compressor prevents clipping and boosts perceived loudness on mobile speakers
@@ -56,40 +63,90 @@ class AmbientAudioEngine {
 
       this.masterGain.connect(this.compressor);
       this.compressor.connect(this.ctx.destination);
+
+      // Listen for browser audio state changes (e.g. unlocked by gesture)
+      this.ctx.onstatechange = () => {
+        if (this.ctx?.state === 'running' && this.isPlaying) {
+          this.ensureLoopsRunning();
+        }
+      };
     }
 
-    if (this.ctx.state === 'suspended') {
-      this.ctx.resume();
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+  }
+
+  private attachAutoUnlockListeners() {
+    if (this.unlockListenersAttached || typeof window === 'undefined') return;
+    this.unlockListenersAttached = true;
+
+    const unlock = () => {
+      if (this.ctx && this.ctx.state === 'suspended') {
+        this.ctx
+          .resume()
+          .then(() => {
+            if (this.isPlaying) {
+              this.ensureLoopsRunning();
+            }
+          })
+          .catch(() => {});
+      } else if (!this.ctx && this.isPlaying) {
+        this.start();
+      }
+    };
+
+    const events = ['pointerdown', 'touchstart', 'touchend', 'click', 'scroll', 'keydown'];
+    events.forEach((evt) => {
+      window.addEventListener(evt, unlock, { passive: true });
+    });
+  }
+
+  private clearTimers() {
+    if (this.chimeTimer) {
+      window.clearTimeout(this.chimeTimer);
+      this.chimeTimer = null;
+    }
+    if (this.padTimer) {
+      window.clearTimeout(this.padTimer);
+      this.padTimer = null;
+    }
+  }
+
+  private ensureLoopsRunning() {
+    if (!this.ctx || this.ctx.state !== 'running' || !this.isPlaying || !this.masterGain) return;
+
+    this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
+    this.masterGain.gain.setValueAtTime(Math.max(0.001, this.masterGain.gain.value), this.ctx.currentTime);
+    this.masterGain.gain.exponentialRampToValueAtTime(0.75, this.ctx.currentTime + 1.5);
+
+    if (!this.padTimer) {
+      this.playAmbientChordLoop();
+    }
+    if (!this.chimeTimer) {
+      this.scheduleWindChimes();
     }
   }
 
   public start() {
-    this.initContext();
-    if (!this.ctx || !this.masterGain) return;
-
-    if (this.isPlaying) return;
     this.isPlaying = true;
+    this.initContext();
 
-    // Smooth master fade-in
-    this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
-    this.masterGain.gain.setValueAtTime(0.001, this.ctx.currentTime);
-    this.masterGain.gain.exponentialRampToValueAtTime(0.75, this.ctx.currentTime + 2.5);
-
-    this.playAmbientChordLoop();
-    this.scheduleWindChimes();
+    if (this.ctx && this.ctx.state === 'running') {
+      this.ensureLoopsRunning();
+    }
   }
 
   public stop() {
-    if (!this.ctx || !this.masterGain || !this.isPlaying) return;
     this.isPlaying = false;
+    this.clearTimers();
+
+    if (!this.ctx || !this.masterGain) return;
 
     // Smooth master fade-out
     this.masterGain.gain.cancelScheduledValues(this.ctx.currentTime);
     this.masterGain.gain.setValueAtTime(Math.max(0.001, this.masterGain.gain.value), this.ctx.currentTime);
-    this.masterGain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 1.2);
-
-    if (this.chimeTimer) window.clearTimeout(this.chimeTimer);
-    if (this.padTimer) window.clearTimeout(this.padTimer);
+    this.masterGain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 0.8);
   }
 
   public setVolume(volume: number) {
@@ -100,14 +157,14 @@ class AmbientAudioEngine {
   }
 
   private playAmbientChordLoop() {
-    if (!this.isPlaying || !this.ctx || !this.masterGain) return;
+    if (!this.isPlaying || !this.ctx || this.ctx.state !== 'running' || !this.masterGain) return;
 
     const chord = this.chordProgressions[this.currentChordIndex];
     this.currentChordIndex = (this.currentChordIndex + 1) % this.chordProgressions.length;
     const duration = 7.5; // seconds per chord swell
 
     chord.forEach((freq, idx) => {
-      if (!this.ctx || !this.masterGain) return;
+      if (!this.ctx || !this.masterGain || this.ctx.state !== 'running') return;
 
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
@@ -140,16 +197,20 @@ class AmbientAudioEngine {
     });
 
     this.padTimer = window.setTimeout(() => {
-      this.playAmbientChordLoop();
+      this.padTimer = null;
+      if (this.isPlaying) {
+        this.playAmbientChordLoop();
+      }
     }, (duration - 1.5) * 1000);
   }
 
   private scheduleWindChimes() {
-    if (!this.isPlaying || !this.ctx) return;
+    if (!this.isPlaying || !this.ctx || this.ctx.state !== 'running') return;
 
     // Trigger random pentatonic bell tone every 2.5 - 5 seconds
     const delay = 2500 + Math.random() * 3000;
     this.chimeTimer = window.setTimeout(() => {
+      this.chimeTimer = null;
       if (this.isPlaying) {
         this.playSingleChime();
         this.scheduleWindChimes();
@@ -158,7 +219,7 @@ class AmbientAudioEngine {
   }
 
   private playSingleChime() {
-    if (!this.ctx || !this.masterGain) return;
+    if (!this.ctx || this.ctx.state !== 'running' || !this.masterGain) return;
 
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
@@ -180,8 +241,8 @@ class AmbientAudioEngine {
   }
 
   public playInteractiveHover() {
-    if (!this.ctx || !this.masterGain) return;
     this.initContext();
+    if (!this.ctx || this.ctx.state !== 'running' || !this.masterGain) return;
 
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
@@ -203,13 +264,13 @@ class AmbientAudioEngine {
   }
 
   public playModalOpen() {
-    if (!this.ctx || !this.masterGain) return;
     this.initContext();
+    if (!this.ctx || this.ctx.state !== 'running' || !this.masterGain) return;
 
     // Two-note crystal arpeggio for modal slide-in
     const chords = [587.33, 880.00]; // D5, A5
     chords.forEach((freq, i) => {
-      if (!this.ctx || !this.masterGain) return;
+      if (!this.ctx || this.ctx.state !== 'running' || !this.masterGain) return;
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
 
