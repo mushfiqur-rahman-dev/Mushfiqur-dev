@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { motion, useScroll, useTransform, useSpring, useReducedMotion } from 'framer-motion';
 
 interface ScrollStoryRevealProps {
@@ -20,6 +20,9 @@ export const ScrollStoryReveal: React.FC<ScrollStoryRevealProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const prefersReducedMotion = useReducedMotion();
+  const [isTouchDevice] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(hover: none)').matches : false
+  );
 
   // For continuous scroll scrub mode
   const { scrollYProgress } = useScroll({
@@ -71,7 +74,7 @@ export const ScrollStoryReveal: React.FC<ScrollStoryRevealProps> = ({
             opacity: scrubOpacity,
             y: scrubY,
             scale: scrubScale,
-            filter: scrubBlur,
+            filter: isTouchDevice ? 'none' : scrubBlur,
           }}
         >
           {children}
@@ -87,14 +90,14 @@ export const ScrollStoryReveal: React.FC<ScrollStoryRevealProps> = ({
         x: initialOffset.x,
         y: initialOffset.y,
         scale: 0.97,
-        filter: prefersReducedMotion ? 'none' : 'blur(8px)',
+        filter: prefersReducedMotion || isTouchDevice ? 'none' : 'blur(8px)',
       }}
       whileInView={{
         opacity: 1,
         x: 0,
         y: 0,
         scale: 1,
-        filter: 'blur(0px)',
+        filter: 'none',
       }}
       viewport={{
         once: false,

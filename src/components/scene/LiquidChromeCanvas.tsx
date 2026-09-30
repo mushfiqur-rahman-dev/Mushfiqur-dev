@@ -14,9 +14,9 @@ precision highp float;
 uniform float uTime;
 uniform vec2 uResolution;
 uniform vec2 uMouse;
+uniform float uIsMobile;
 varying vec2 vUv;
 
-#define MAX_STEPS 90
 #define MAX_DIST 40.0
 #define SURF_DIST 0.001
 
@@ -32,8 +32,10 @@ float getSceneSDF(vec3 p) {
   // Mouse-reactive main fluid node
   float d = length(p - vec3(mPos.x, mPos.y, 1.2)) - 0.9;
 
-  // 8 Primary organic mercury fluid bodies (forming the lush left and right fluid frames)
+  // Primary organic mercury fluid bodies
+  int primaryCount = uIsMobile > 0.5 ? 4 : 8;
   for(int i = 0; i < 8; i++) {
+      if(i >= primaryCount) break;
       float fi = float(i);
       vec3 pos = vec3(
           sin(t * 0.7 + fi * 1.5) * 3.8,
@@ -46,8 +48,10 @@ float getSceneSDF(vec3 p) {
       d = smin(d, length(p_str) - r, 1.1);
   }
 
-  // 16 Micro fluid beads / mercury satellites
+  // Micro fluid beads / mercury satellites
+  int satelliteCount = uIsMobile > 0.5 ? 6 : 16;
   for(int j = 0; j < 16; j++) {
+      if(j >= satelliteCount) break;
       float fj = float(j);
       vec3 pos = vec3(
           sin(t * 1.3 + fj * 4.1) * 5.2,
@@ -102,7 +106,9 @@ void main() {
   vec3 rd = normalize(vec3(uv, 3.2));
 
   float dTotal = 0.0;
-  for(int i = 0; i < MAX_STEPS; i++) {
+  int maxSteps = uIsMobile > 0.5 ? 36 : 80;
+  for(int i = 0; i < 80; i++) {
+      if(i >= maxSteps) break;
       vec3 p = ro + rd * dTotal;
       float dS = getSceneSDF(p);
       dTotal += dS;
@@ -154,15 +160,16 @@ export const LiquidChromeCanvas: React.FC<{ className?: string }> = ({
     const container = containerRef.current;
     if (!container) return;
 
+    const isMobile = window.innerWidth < 768;
     const scene = new THREE.Scene();
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
     const renderer = new THREE.WebGLRenderer({
-      antialias: true,
+      antialias: !isMobile,
       alpha: true,
       powerPreference: 'high-performance',
     });
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = isMobile ? 1.0 : Math.min(window.devicePixelRatio || 1, 1.75);
     renderer.setPixelRatio(dpr);
     renderer.setSize(window.innerWidth, window.innerHeight);
     container.appendChild(renderer.domElement);
@@ -181,6 +188,7 @@ export const LiquidChromeCanvas: React.FC<{ className?: string }> = ({
           ),
         },
         uMouse: { value: new THREE.Vector2(0.5, 0.5) },
+        uIsMobile: { value: isMobile ? 1.0 : 0.0 },
       },
       depthWrite: false,
       depthTest: false,
@@ -209,8 +217,10 @@ export const LiquidChromeCanvas: React.FC<{ className?: string }> = ({
       const w = window.innerWidth;
       const h = window.innerHeight;
       renderer.setSize(w, h);
-      const currentDpr = Math.min(window.devicePixelRatio || 1, 2);
+      const isMob = w < 768;
+      const currentDpr = isMob ? 1.0 : Math.min(window.devicePixelRatio || 1, 1.75);
       renderer.setPixelRatio(currentDpr);
+      material.uniforms.uIsMobile.value = isMob ? 1.0 : 0.0;
       material.uniforms.uResolution.value.set(w * currentDpr, h * currentDpr);
     };
 

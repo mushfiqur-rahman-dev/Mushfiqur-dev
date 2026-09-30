@@ -22,6 +22,9 @@ export const SpotlightCard: React.FC<SpotlightCardProps> = ({
 }) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const [isHovered, setIsHovered] = useState(false);
+  const [isTouchDevice] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(hover: none)').matches : false
+  );
   const prefersReducedMotion = useReducedMotion();
 
   // Mouse coordinates inside card
@@ -38,9 +41,20 @@ export const SpotlightCard: React.FC<SpotlightCardProps> = ({
   const rotateYSpring = useSpring(useTransform(tiltX, [-0.5, 0.5], [-6, 6]), springConfig);
   const scaleSpring = useSpring(isHovered ? 1.01 : 1, springConfig);
 
+  // Unconditional top-level transforms for spotlight gradients
+  const spotlightBackground = useTransform(
+    [mouseX, mouseY],
+    ([x, y]) => `radial-gradient(400px circle at ${x}px ${y}px, ${spotlightColor}, transparent 80%)`
+  );
+
+  const borderHighlight = useTransform(
+    [mouseX, mouseY],
+    ([x, y]) => `radial-gradient(280px circle at ${x}px ${y}px, rgba(0, 0, 0, 0.12), transparent 70%)`
+  );
+
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!cardRef.current) return;
+      if (isTouchDevice || !cardRef.current) return;
       const rect = cardRef.current.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
@@ -55,26 +69,30 @@ export const SpotlightCard: React.FC<SpotlightCardProps> = ({
 
       onMouseMove?.(e);
     },
-    [enableTilt, prefersReducedMotion, mouseX, mouseY, tiltX, tiltY, onMouseMove]
+    [isTouchDevice, enableTilt, prefersReducedMotion, mouseX, mouseY, tiltX, tiltY, onMouseMove]
   );
 
   const handleMouseEnter = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      if (isTouchDevice) return;
       setIsHovered(true);
       onMouseEnter?.(e);
     },
-    [onMouseEnter]
+    [isTouchDevice, onMouseEnter]
   );
 
   const handleMouseLeave = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
+      if (isTouchDevice) return;
       setIsHovered(false);
       tiltX.set(0);
       tiltY.set(0);
       onMouseLeave?.(e);
     },
-    [tiltX, tiltY, onMouseLeave]
+    [isTouchDevice, tiltX, tiltY, onMouseLeave]
   );
+
+  const shouldTilt = enableTilt && !prefersReducedMotion && !isTouchDevice;
 
   return (
     <motion.div
@@ -83,13 +101,13 @@ export const SpotlightCard: React.FC<SpotlightCardProps> = ({
         opacity: 0,
         y: prefersReducedMotion ? 0 : 36,
         scale: prefersReducedMotion ? 1 : 0.96,
-        filter: prefersReducedMotion ? 'none' : 'blur(8px)',
+        filter: prefersReducedMotion || isTouchDevice ? 'none' : 'blur(8px)',
       }}
       whileInView={{
         opacity: 1,
         y: 0,
         scale: 1,
-        filter: 'blur(0px)',
+        filter: 'none',
       }}
       viewport={{
         once: false,
@@ -103,9 +121,9 @@ export const SpotlightCard: React.FC<SpotlightCardProps> = ({
       }}
       style={{
         perspective: 1000,
-        rotateX: enableTilt && !prefersReducedMotion ? rotateXSpring : 0,
-        rotateY: enableTilt && !prefersReducedMotion ? rotateYSpring : 0,
-        scale: enableTilt && !prefersReducedMotion ? scaleSpring : 1,
+        rotateX: shouldTilt ? rotateXSpring : 0,
+        rotateY: shouldTilt ? rotateYSpring : 0,
+        scale: shouldTilt ? scaleSpring : 1,
         transformStyle: 'preserve-3d',
       }}
       onMouseMove={handleMouseMove}
@@ -114,35 +132,31 @@ export const SpotlightCard: React.FC<SpotlightCardProps> = ({
       className={`relative overflow-hidden ${className}`}
       {...(props as any)}
     >
-      {/* Dynamic Cursor Spotlight Radial Gradient */}
-      <motion.div
-        className="pointer-events-none absolute -inset-px rounded-[inherit] transition-opacity duration-300 z-20"
-        style={{
-          opacity: isHovered ? 1 : 0,
-          background: useTransform(
-            [mouseX, mouseY],
-            ([x, y]) =>
-              `radial-gradient(400px circle at ${x}px ${y}px, ${spotlightColor}, transparent 80%)`
-          ),
-        }}
-      />
+      {/* Dynamic Cursor Spotlight Radial Gradient (Desktop Mouse Only) */}
+      {!isTouchDevice && (
+        <motion.div
+          className="pointer-events-none absolute -inset-px rounded-[inherit] transition-opacity duration-300 z-20"
+          style={{
+            opacity: isHovered ? 1 : 0,
+            background: spotlightBackground,
+          }}
+        />
+      )}
 
-      {/* Dynamic Border Specular Highlight */}
-      <motion.div
-        className="pointer-events-none absolute -inset-px rounded-[inherit] transition-opacity duration-300 z-20"
-        style={{
-          opacity: isHovered ? 1 : 0,
-          background: useTransform(
-            [mouseX, mouseY],
-            ([x, y]) =>
-              `radial-gradient(280px circle at ${x}px ${y}px, rgba(0, 0, 0, 0.12), transparent 70%)`
-          ),
-          maskImage: 'linear-gradient(#fff, #fff)',
-          WebkitMaskImage: 'linear-gradient(#fff, #fff)',
-          maskComposite: 'exclude',
-          WebkitMaskComposite: 'destination-out',
-        }}
-      />
+      {/* Dynamic Border Specular Highlight (Desktop Mouse Only) */}
+      {!isTouchDevice && (
+        <motion.div
+          className="pointer-events-none absolute -inset-px rounded-[inherit] transition-opacity duration-300 z-20"
+          style={{
+            opacity: isHovered ? 1 : 0,
+            background: borderHighlight,
+            maskImage: 'linear-gradient(#fff, #fff)',
+            WebkitMaskImage: 'linear-gradient(#fff, #fff)',
+            maskComposite: 'exclude',
+            WebkitMaskComposite: 'destination-out',
+          }}
+        />
+      )}
 
       {/* Card Content */}
       <div className="relative z-10 h-full w-full">{children}</div>
